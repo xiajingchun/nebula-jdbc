@@ -7,6 +7,7 @@ package com.vesoft.nebula.jdbc.impl;
 
 import com.vesoft.nebula.client.graph.data.ResultSet;
 import com.vesoft.nebula.client.graph.exception.IOErrorException;
+import com.vesoft.nebula.client.graph.net.NebulaPool;
 import com.vesoft.nebula.client.graph.net.Session;
 import com.vesoft.nebula.jdbc.NebulaAbstractConnection;
 import com.vesoft.nebula.jdbc.NebulaAbstractResultSet;
@@ -19,14 +20,16 @@ import java.util.Properties;
 public class NebulaConnection extends NebulaAbstractConnection {
 
     private NebulaDriver nebulaDriver;
+    private NebulaPool nebulaPool;
 
     private Session nebulaSession;
     private String graphSpace = "unknown";
     private boolean isClosed = false;
 
-    protected NebulaConnection(NebulaDriver nebulaDriver, String graphSpace) throws SQLException {
+    protected NebulaConnection(NebulaDriver nebulaDriver, NebulaPool nebulaPool, String graphSpace) throws SQLException {
         super(NebulaAbstractResultSet.CLOSE_CURSORS_AT_COMMIT);
         this.nebulaDriver = nebulaDriver;
+        this.nebulaPool = nebulaPool;
         this.nebulaSession = this.nebulaDriver.getSessionFromNebulaPool();
         this.connectionConfig = this.nebulaDriver.getConnectionConfig();
 
@@ -64,6 +67,7 @@ public class NebulaConnection extends NebulaAbstractConnection {
     public void close() throws SQLException {
         this.checkClosed();
         this.nebulaSession.release();
+        this.nebulaPool.close();
         this.isClosed = true;
         log.info("JDBCConnection closed");
 

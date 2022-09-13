@@ -28,7 +28,15 @@ public class NebulaDriver extends NebulaAbstractDriver {
     private final Logger log = LoggerFactory.getLogger(this.getClass());
 
     private NebulaPoolConfig nebulaPoolConfig;
-    private NebulaPool nebulaPool = new NebulaPool();
+    private NebulaPool nebulaPool;
+
+    static {
+        try {
+            NebulaDriver driver = new NebulaDriver();
+        } catch (SQLException e) {
+            throw new ExceptionInInitializerError(e);
+        }
+    }
 
     /**
      * NebulaDriver() is used to get and registerDriver a default Driver object with default properties to initialize {@link NebulaPool},
@@ -36,7 +44,6 @@ public class NebulaDriver extends NebulaAbstractDriver {
      * */
     public NebulaDriver() throws SQLException {
         this.setDefaultPoolProperties();
-        this.initNebulaPool();
         DriverManager.registerDriver(this);
     }
 
@@ -46,7 +53,6 @@ public class NebulaDriver extends NebulaAbstractDriver {
      * */
     public NebulaDriver(Properties poolProperties) throws SQLException {
         this.poolProperties = poolProperties;
-        this.initNebulaPool();
         DriverManager.registerDriver(this);
     }
 
@@ -57,7 +63,7 @@ public class NebulaDriver extends NebulaAbstractDriver {
     public NebulaDriver (String address) throws SQLException {
         String[] addressInfo =  address.split(":");
         if(addressInfo.length != 2){
-            throw new SQLException(String.format("url [%s] is invalid, please make sure your url match thr format: \"ip:port\".", address));
+            throw new SQLException(String.format("url [%s] is invalid, please make sure your url match the format: \"ip:port\".", address));
         }
 
         String ip = addressInfo[0];
@@ -65,7 +71,6 @@ public class NebulaDriver extends NebulaAbstractDriver {
         List<HostAddress> customizedAddressList = Arrays.asList(new HostAddress(ip, port));
 
         this.poolProperties.put("addressList", customizedAddressList);
-        initNebulaPool();
 
         DriverManager.registerDriver(this);
     }
@@ -90,15 +95,15 @@ public class NebulaDriver extends NebulaAbstractDriver {
         nebulaPoolConfig.setIntervalIdle(intervalIdle);
         nebulaPoolConfig.setWaitTime(waitTime);
 
-        try{
+        try {
             long start = System.currentTimeMillis();
+            this.nebulaPool = new NebulaPool();
             this.nebulaPool.init(addressList, nebulaPoolConfig);
             long end = System.currentTimeMillis();
-            log.info("NebulaPool.init(addressList, nebulaPoolConfig) use " +  (end - start) + " ms");
-        }catch (UnknownHostException | InvalidConfigException e){
+            log.info("NebulaPool.init(addressList, nebulaPoolConfig) use " + (end - start) + " ms");
+        } catch (UnknownHostException | InvalidConfigException e) {
             throw new SQLException(e);
         }
-
     }
 
     protected Session getSessionFromNebulaPool() throws SQLException {
@@ -127,17 +132,57 @@ public class NebulaDriver extends NebulaAbstractDriver {
     @Override
     public Connection connect(String url, Properties connectionConfig) throws SQLException {
         if(this.acceptsURL(url)){
+            url = parseAddress(url);
             parseUrlProperties(url, connectionConfig);
             this.connectionConfig.put("url", url);
             String graphSpace = this.connectionConfig.getProperty("graphSpace");
-            NebulaConnection JdbcConnection = new NebulaConnection(this, graphSpace);
+            initNebulaPool();
+            NebulaConnection JdbcConnection = new NebulaConnection(this, this.nebulaPool, graphSpace);
             log.info("Get JDBCConnection succeeded");
             return JdbcConnection;
         }else {
             throw new SQLException("url: " + url + " is not accepted, " +
-                    "url example: jdbc:nebula://graphSpace " +
+                    "url example: jdbc:nebula://ip1:port1,ip2:port2/graphSpace " +
                     "make sure your url match this format.");
         }
+    }
+
+    /**
+     * Parse an extended JDBC url supporting the syntax:
+     *
+     *      jdbc:nebula://host:port,host:port,.../graphSpace
+     *
+     * @param url extended url
+     * @return the original url 'jdbc:nebula://graphSpace'
+     * @throws SQLException if the servers are not specified as 'host:port' or 'port' is not an integer
+     */
+    protected String parseAddress(String url) throws SQLException {
+        // jdbc:nebula://ip:port,ip:port,.../graphspace
+
+        int b = url.indexOf("//");
+        int e = url.indexOf("/", b+2);
+        if (e == -1)
+            return url;
+
+        String addresses = url.substring(b+2, e);
+        url = url.substring(0, b+2) + url.substring(e+1);
+
+        String[] addressesList = addresses.split(",");
+        List<HostAddress> customizedAddressList = new ArrayList<>();
+
+        for (String address : addressesList) {
+            String[] addressInfo =  address.split(":");
+            if(addressInfo.length != 2){
+                throw new SQLException(String.format("url [%s] is invalid, please make sure your url match thr format: \"ip:port\".", url));
+            }
+            String ip = addressInfo[0];
+            int port = Integer.parseInt(addressInfo[1]);
+            customizedAddressList.add(new HostAddress(ip, port));
+        }
+
+        this.poolProperties.put("addressList", customizedAddressList);
+
+        return url;
     }
 
     /**
